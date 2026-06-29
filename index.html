@@ -53,6 +53,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .hdr-btn:hover{background:var(--surf3);color:var(--text);}
 .hdr-btn-clear{border-color:rgba(239,68,68,.4);color:rgba(239,68,68,.75);}
 .hdr-btn-clear:hover{background:rgba(239,68,68,.12);color:#ef4444;border-color:#ef4444;}
+.draft-save-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;background:var(--surf2);border:1px solid var(--border);margin-bottom:5px;}
+.dsi-name{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dsi-meta{font-size:10px;color:var(--muted);white-space:nowrap;}
+.dsi-btn{padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:none;font-size:11px;font-weight:700;cursor:pointer;}
+.dsi-load{color:var(--accent);border-color:var(--accent);}
+.dsi-load:hover{background:rgba(99,102,241,.12);}
+.dsi-del{color:var(--danger);border-color:rgba(239,68,68,.4);}
+.dsi-del:hover{background:rgba(239,68,68,.1);}
 
 /* LEFT PANEL */
 .left-panel{background:var(--surf);border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;}
@@ -350,6 +358,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
   <button class="hdr-btn" id="btn-log">📋 Full Log</button>
   <button class="hdr-btn" id="btn-data">⚙️ Update Data</button>
   <button class="hdr-btn" id="btn-undo">↩ Undo</button>
+  <button class="hdr-btn" id="btn-drafts">💾 Drafts</button>
   <button class="hdr-btn hdr-btn-clear" id="btn-clear">🗑 New Draft</button>
 </div>
 
@@ -502,6 +511,39 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
     <div class="data-status" id="data-personal-status">Not loaded</div>
   </div>
   <button class="modal-cancel" style="margin-top:8px" id="data-close">Close</button>
+</div>
+</div>
+
+<!-- DRAFT MANAGER MODAL -->
+<div class="modal-bg hidden" id="drafts-modal">
+<div class="log-modal-inner" style="width:480px">
+  <div class="log-modal-hdr">
+    <span style="font-size:15px;font-weight:700">💾 Draft Manager</span>
+    <button id="drafts-close" style="background:none;border:none;color:var(--muted2);font-size:18px;cursor:pointer;line-height:1">✕</button>
+  </div>
+  <div class="log-modal-body" style="padding:16px">
+    <!-- Save current -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:7px">Save Current Draft</div>
+      <div style="display:flex;gap:7px">
+        <input id="draft-name-input" type="text" placeholder="Draft name (e.g. Mock #1, League Draft…)" style="flex:1;background:var(--surf2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--fg);font-size:13px;outline:none">
+        <button id="draft-save-btn" style="padding:7px 14px;border-radius:6px;border:1px solid var(--my);background:rgba(16,185,129,.12);color:var(--my);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Save</button>
+      </div>
+    </div>
+    <!-- Saved list -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:7px">Saved Drafts</div>
+      <div id="drafts-list" style="max-height:220px;overflow-y:auto"></div>
+    </div>
+    <!-- Export / Import -->
+    <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;gap:8px">
+      <button id="draft-export-btn" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--surf2);color:var(--muted2);font-size:12px;font-weight:700;cursor:pointer">⬇ Export JSON</button>
+      <label style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--surf2);color:var(--muted2);font-size:12px;font-weight:700;cursor:pointer;text-align:center">
+        ⬆ Import JSON
+        <input type="file" id="draft-import-file" accept=".json" style="display:none">
+      </label>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -1639,6 +1681,115 @@ document.getElementById('search').addEventListener('input',e=>{ST.search=e.targe
 
 // Buttons
 document.getElementById('btn-undo').addEventListener('click',undoLast);
+
+// ============================================================
+// DRAFT SAVE / LOAD / EXPORT / IMPORT
+// ============================================================
+const DRAFTS_KEY='ff_saved_drafts';
+
+function getDraftStore(){
+  try{return JSON.parse(localStorage.getItem(DRAFTS_KEY)||'{}');}catch(e){return {};}
+}
+function setDraftStore(obj){
+  localStorage.setItem(DRAFTS_KEY,JSON.stringify(obj));
+}
+
+function draftSnapshot(){
+  return {picks:ST.picks,currentPick:ST.currentPick,queue:ST.queue,savedAt:new Date().toISOString()};
+}
+
+function renderDraftsList(){
+  const store=getDraftStore();
+  const keys=Object.keys(store).sort((a,b)=>new Date(store[b].savedAt)-new Date(store[a].savedAt));
+  const el=document.getElementById('drafts-list');
+  if(!keys.length){
+    el.innerHTML='<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px;font-style:italic">No saved drafts yet</div>';
+    return;
+  }
+  el.innerHTML=keys.map(name=>{
+    const d=store[name];
+    const date=new Date(d.savedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const picks=d.picks?d.picks.length:0;
+    return `<div class="draft-save-item">
+      <div>
+        <div class="dsi-name">${name}</div>
+        <div class="dsi-meta">${picks} picks · ${date}</div>
+      </div>
+      <button class="dsi-btn dsi-load" onclick="loadDraftByName('${name.replace(/'/g,"\\'")}')">Load</button>
+      <button class="dsi-btn dsi-del" onclick="deleteDraftByName('${name.replace(/'/g,"\\'")}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function saveDraft(){
+  const name=document.getElementById('draft-name-input').value.trim();
+  if(!name){alert('Please enter a draft name.');return;}
+  const store=getDraftStore();
+  store[name]=draftSnapshot();
+  setDraftStore(store);
+  document.getElementById('draft-name-input').value='';
+  renderDraftsList();
+}
+
+function loadDraftByName(name){
+  const store=getDraftStore();
+  const d=store[name];
+  if(!d){alert('Draft not found.');return;}
+  if(!confirm(`Load "${name}"? This will replace your current draft.`)) return;
+  ST.picks=d.picks||[];
+  ST.currentPick=d.currentPick||1;
+  ST.queue=d.queue||[];
+  ST.pendingIdx=null;
+  document.getElementById('drafts-modal').classList.add('hidden');
+  renderAll();
+}
+
+function deleteDraftByName(name){
+  if(!confirm(`Delete "${name}"?`)) return;
+  const store=getDraftStore();
+  delete store[name];
+  setDraftStore(store);
+  renderDraftsList();
+}
+
+function exportDraft(){
+  const data=JSON.stringify(draftSnapshot(),null,2);
+  const blob=new Blob([data],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`draft_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importDraft(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const d=JSON.parse(e.target.result);
+      if(!Array.isArray(d.picks)) throw new Error('Invalid format');
+      if(!confirm('Import this draft? It will replace your current draft.')) return;
+      ST.picks=d.picks||[];
+      ST.currentPick=d.currentPick||1;
+      ST.queue=d.queue||[];
+      ST.pendingIdx=null;
+      document.getElementById('drafts-modal').classList.add('hidden');
+      renderAll();
+    }catch(err){alert('Could not read draft file: '+err.message);}
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('btn-drafts').addEventListener('click',()=>{
+  renderDraftsList();
+  document.getElementById('drafts-modal').classList.remove('hidden');
+});
+document.getElementById('drafts-close').addEventListener('click',()=>document.getElementById('drafts-modal').classList.add('hidden'));
+document.getElementById('drafts-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)e.currentTarget.classList.add('hidden');});
+document.getElementById('draft-save-btn').addEventListener('click',saveDraft);
+document.getElementById('draft-name-input').addEventListener('keydown',e=>{if(e.key==='Enter')saveDraft();});
+document.getElementById('draft-export-btn').addEventListener('click',exportDraft);
+document.getElementById('draft-import-file').addEventListener('change',e=>{if(e.target.files[0])importDraft(e.target.files[0]);e.target.value='';});
 document.getElementById('btn-clear').addEventListener('click',()=>{
   if(!confirm('Clear all picks and start a new draft? This cannot be undone.')) return;
   ST.picks=[];
@@ -1698,7 +1849,7 @@ document.getElementById('data-personal-file').addEventListener('change',e=>{
 
 // Keyboard
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){['pick-modal','log-modal','team-modal','data-modal','edit-pick-modal'].forEach(id=>document.getElementById(id).classList.add('hidden'));}
+  if(e.key==='Escape'){['pick-modal','log-modal','team-modal','data-modal','edit-pick-modal','drafts-modal'].forEach(id=>document.getElementById(id).classList.add('hidden'));}
 });
 </script>
 </body>
